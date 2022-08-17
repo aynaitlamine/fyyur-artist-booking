@@ -3,6 +3,7 @@
 #----------------------------------------------------------------------------#
 #Run: FLASK_APP=app.py FLASK_DEBUG=true flask run
 import json
+import datetime
 import dateutil.parser
 import babel
 from flask import Flask, render_template, request, Response, flash, redirect, url_for
@@ -12,9 +13,9 @@ import logging
 from logging import Formatter, FileHandler
 from flask_wtf import Form
 from forms import *
-
 from flask_migrate import Migrate
-import datetime
+
+
 
 #----------------------------------------------------------------------------#
 # App Config.
@@ -26,62 +27,22 @@ app.config.from_object('config')
 db = SQLAlchemy(app)
 
 # TODO: connect to a local postgresql database
+
 migrate = Migrate(app, db)
 #----------------------------------------------------------------------------#
 # Models.
 #----------------------------------------------------------------------------#
-
-
-class Venue(db.Model):
-    __tablename__ = 'Venue'
-
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String)
-    city = db.Column(db.String(120))
-    state = db.Column(db.String(120))
-    address = db.Column(db.String(120))
-    phone = db.Column(db.String(120))
-    image_link = db.Column(db.String(500))
-    facebook_link = db.Column(db.String(120))
-
-    # TODO: implement any missing fields, as a database migration using Flask-Migrate
-    shows = db.relationship('Show', backref='venue',
-                            lazy=True, cascade="save-update, delete")
-    genres = db.Column(db.String(120))
-
-
-class Artist(db.Model):
-    __tablename__ = 'Artist'
-
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String)
-    city = db.Column(db.String(120))
-    state = db.Column(db.String(120))
-    phone = db.Column(db.String(120))
-    genres = db.Column(db.String(120))
-    image_link = db.Column(db.String(500))
-    facebook_link = db.Column(db.String(120))
-
-    # TODO: implement any missing fields, as a database migration using Flask-Migrate
-    shows = db.relationship('Show', backref='artist',
-                            lazy=True, cascade="save-update, delete")
-
-
-# TODO Implement Show and Artist models, and complete all model relationships and properties, as a database migration.
-class Show(db.Model):
-  __tablename__ = 'show'
-  id = db.Column(db.Integer, primary_key=True)
-  venue_id = db.Column(db.Integer, db.ForeignKey("Venue.id"), nullable=False)
-  artist_id = db.Column(db.Integer, db.ForeignKey('Artist.id'), nullable=False)
-  date_time = db.Column(db.DateTime, nullable=False)
-
+from models import *
 
 #----------------------------------------------------------------------------#
 # Filters.
 #----------------------------------------------------------------------------#
 
 def format_datetime(value, format='medium'):
-  date = dateutil.parser.parse(value)
+  if isinstance(value, str):
+    date = dateutil.parser.parse(value)
+  else:
+    date = value
   if format == 'full':
       format = "EEEE MMMM, d, y 'at' h:mma"
   elif format == 'medium':
@@ -119,7 +80,7 @@ def index():
 def venues():
   # TODO: replace with real venues data.
   #       num_shows should be aggregated based on number of upcoming shows per venue.
-  venues = Venue.query.all()
+  venues = db.session.query(Venue).all()
   cities = {}
   data = []
   for v in venues:
@@ -135,7 +96,7 @@ def venues():
           "venues": [{
               "id": v.id,
               "name": v.name,
-              "num_upcoming_shows": 0,
+              "num_upcoming_shows": len(db.session.query(Show).filter(Show.venue_id== v.id).filter(Show.start_time>datetime.datetime.now()).all()),
           } for v in venue_list]
       })
   return render_template('pages/venues.html', areas=data)
@@ -143,9 +104,6 @@ def venues():
 
 @app.route('/venues/search', methods=['POST'])
 def search_venues():
-  # TODO: implement search on artists with partial string search. Ensure it is case-insensitive.
-  # seach for Hop should return "The Musical Hop".
-  # search for "Music" should return "The Musical Hop" and "Park Square Live Music & Coffee"
   search_term = request.form['search_term']
   venues = Venue.query.filter(Venue.name.ilike(f'%{search_term}%')).all()
   response = {
@@ -153,7 +111,7 @@ def search_venues():
       "data": [{
           "id": v.id,
           "name": v.name,
-          "num_upcoming_shows": 0,
+          "num_upcoming_shows": len(db.session.query(Show).filter(Show.venue_id== v.id).filter(Show.start_time>datetime.now()).all()),
       } for v in venues]
   }
   return render_template('pages/search_venues.html', results=response, search_term=request.form.get('search_term', ''))
@@ -168,22 +126,12 @@ def show_venue(venue_id):
   if venue == None:
     return not_found_error(404)
 
-  artists_shows = db.session.query(Artist).join(Show).filter(Show.venue_id == venue.id)\
-      .with_entities(Artist.id, Artist.name, Artist.image_link, Show.date_time).all()
 
-  upcoming_shows = []
-  past_shows = []
-  for a in artists_shows:
-    sh = {
-        "artist_id": a[0],
-        "artist_name": a[1],
-        "artist_image_link": a[2],
-        "start_time": dateToStr(a[3])
-    }
-    if a[3] > datetime.datetime.now():
-        upcoming_shows.append(sh)
-    else:
-      past_shows.append(sh)
+  past_shows = db.session.query(Show).join(Venue).filter(Show.venue_id==venue_id).filter(Show.start_time<datetime.datetime.now()).all()
+
+  upcoming_shows = db.session.query(Show).join(Venue).filter(Show.venue_id==venue_id).filter(Show. 
+  start_time>datetime.datetime.now()).all()
+
 
   data = {
       "id": venue.id,
@@ -236,7 +184,6 @@ def create_venue_submission():
 
   # TODO: on unsuccessful db insert, flash an error instead.
   except Exception as e:
-    print(str(e))
     db.session.rollback()
     flash('An error occurred. Venue ' +
           request.form['name'] + ' could not be listed.')
@@ -293,7 +240,7 @@ def search_artists():
       "data": [{
           "id": a.id,
           "name": a.name,
-          "num_upcoming_shows": 0,
+          "num_upcoming_shows": len(db.session.query(Show).filter(Show.artist_id==a.id).filter(Show.start_time>datetime.now()).all())
       } for a in artists]
   }
   return render_template('pages/search_artists.html', results=response, search_term=request.form.get('search_term', ''))
@@ -309,20 +256,12 @@ def show_artist(artist_id):
     return not_found_error(404)
 
   venue_shows = db.session.query(Venue).join(Show).filter(Show.artist_id == artist.id)\
-      .with_entities(Venue.id, Venue.name, Venue.image_link, Show.date_time).all()
-  upcoming_shows = []
-  past_shows = []
-  for v in venue_shows:
-    sh = {
-        "venue_id": v[0],
-        "venue_name": v[1],
-        "venue_image_link": v[2],
-        "start_time": dateToStr(v[3])
-    }
-    if v[3] > datetime.datetime.now():
-        upcoming_shows.append(sh)
-    else:
-      past_shows.append(sh)
+      .with_entities(Venue.id, Venue.name, Venue.image_link, Show.start_time).all()
+  past_shows = db.session.query(Show).join(Venue).filter(Show.artist_id==artist_id).filter(Show.start_time<datetime.datetime.now()).all()
+
+  upcoming_shows = db.session.query(Show).join(Venue).filter(Show.artist_id==artist_id).filter(Show. 
+  start_time>datetime.datetime.now()).all()
+  
 
   data = {
       "id": artist.id,
@@ -391,7 +330,6 @@ def edit_artist_submission(artist_id):
     db.session.commit()
     flash('Artist ' + old_name + ' was successfully updated!')
   except Exception as e:
-    print(str(e))
     db.session.rollback()
     flash('An error occurred. Artist ' + old_name + ' could not be updated!')
 
@@ -442,7 +380,6 @@ def edit_venue_submission(venue_id):
     db.session.commit()
     flash('Venue ' + old_name + ' was successfully updated!')
   except Exception as e:
-    print(str(e))
     db.session.rollback()
     flash('An error occurred. Venue ' + old_name + ' could not be updated!')
   # venue record with ID <venue_id> using the new attributes
@@ -479,7 +416,6 @@ def create_artist_submission():
     flash('Artist ' + request.form['name'] + ' was successfully listed!')
   # TODO: on unsuccessful db insert, flash an error instead.
   except Exception as e:
-    print(str(e))
     db.session.rollback()
     flash('An error occurred. Artist ' +
           request.form['name'] + ' could not be listed.')
@@ -495,9 +431,8 @@ def shows():
   # displays list of shows at /shows
   # TODO: replace with real venues data.
   #       num_shows should be aggregated based on number of upcoming shows per venue.
-  results = db.session.query(Venue).join(Show, Venue.id == Show.venue_id).join(Artist, Artist.id == Show.artist_id)\
-      .with_entities(Venue.id, Venue.name, Artist.id, Artist.name, Artist.image_link, Show.date_time)\
-      .order_by(Show.date_time).all()
+  results = db.session.query(Venue).join(Show, Venue.id == Show.venue_id).join(Artist, Artist.id == Show.artist_id).with_entities(Venue.id, Venue.name, Artist.id, Artist.name, Artist.image_link, Show.start_time)\
+      .order_by(Show.start_time).all()
   data = [{
       "venue_id": res[0],
       "venue_name": res[1],
@@ -523,7 +458,7 @@ def create_show_submission():
   # TODO: insert form data as a new Show record in the db, instead
   venue_id = request.form['venue_id']
   artist_id = request.form['artist_id']
-  date_time = datetime.datetime.strptime(
+  start_time = datetime.datetime.strptime(
       request.form['start_time'], '%Y-%m-%d %H:%M:%S')
   venue = Venue.query.filter(Venue.id == venue_id).all()
   artist = Artist.query.filter(Artist.id == artist_id).all()
@@ -533,13 +468,12 @@ def create_show_submission():
     flash('Artist id does not exsit!')
   else:
     try:
-      show = Show(venue_id=venue_id, artist_id=artist_id, date_time=date_time)
+      show = Show(venue_id=venue_id, artist_id=artist_id, start_time=start_time)
       db.session.add(show)
       db.session.commit()
       # on successful db insert, flash success
       flash('Show was successfully listed!')
     except Exception as e:
-      print(str(e))
       db.session.rollback()
       # TODO: on unsuccessful db insert, flash an error instead.
       flash('An error occurred. Show could not be listed.')
